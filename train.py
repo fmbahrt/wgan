@@ -1,3 +1,5 @@
+import sys
+
 import torch
 
 from dataset import celeba
@@ -8,6 +10,6 @@ cri = Critic()
 
 wgan = WGAN(gen, cri, cuda=torch.cuda.is_available())
 
-dataloader = celeba('/home/frederik/Documents/diku/bscthesis/data/celeba')
+dataloader = celeba(sys.argv[1], batch_size=256)
 
 wgan.train(dataloader, epochs=10)

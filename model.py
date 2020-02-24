@@ -6,9 +6,6 @@ import torch.nn.functional as F
 
 import imageio
 
-from tqdm import tqdm
-from torch.autograd import Variable
-
 import numpy as np
 import torchvision.utils as vutils
 
@@ -109,8 +106,8 @@ class WGAN():
                                       lr=1e-4,
                                       betas=(0.5, 0.9))
 
-        self.g_opt = self.g_opt.cuda() if self.cuda else self.g_opt
-        self.c_opt = self.c_opt.cuda() if self.cuda else self.c_opt
+        self.G = self.G.cuda() if self.cuda else self.G
+        self.C = self.C.cuda() if self.cuda else self.C
 
         self.seeds = torch.randn((64, 256))
         self.seeds = self.seeds.cuda() if self.cuda else self.seeds
@@ -125,7 +122,7 @@ class WGAN():
             batch_size = real_data.size(0)
 
             # Sample real data
-            real_data = real_data
+            real_data = real_data.cuda() if self.cuda else real_data
             
             # Sample fake datga
             z = torch.randn((batch_size, 256))
@@ -136,11 +133,13 @@ class WGAN():
 
             if i % n_critic == 0:
                 g_loss = self._generator_step(gen_data, batch_size)
-                self._sample_to_disk()
 
                 print("STEP {}: C_LOSS {} - G_LOSS {} - LP {}".format(i, c_loss,
                                                                       g_loss, lp))
                 sys.stdout.flush()
+
+            if i % 200 == 0:
+                self._sample_to_disk()
 
     def _critic_step(self, data, gen_data, batch_size):
         self.c_opt.zero_grad()
@@ -181,6 +180,7 @@ class WGAN():
         c_preds = self.C(inter)
 
         g_outs = torch.ones(c_preds.size())
+        g_outs = g_outs.cuda() if self.cuda else g_outs
 
         grads = torch.autograd.grad(
             outputs      = c_preds,
@@ -198,6 +198,7 @@ class WGAN():
         
         # Time for LP :-)
         zeros   = torch.zeros(g_norms.size())
+        zeros   = zeros.cuda() if self.cuda else zeros
         
         g_norms = torch.max(zeros, g_norms-1) ** 2
         lp = lamb * g_norms.mean()
@@ -217,7 +218,7 @@ class WGAN():
         return inter
     
     def _sample_to_disk(self):
-        img = np.transpose(vutils.make_grid(self.G(self.seeds).detach(), padding=2,
+        img = np.transpose(vutils.make_grid(self.G(self.seeds).detach().cpu(), padding=2,
                                                  normalize=True), (1, 2, 0))
         
         self.images.append((img.numpy() * 255.0).astype(np.uint8))
