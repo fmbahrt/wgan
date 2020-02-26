@@ -7,7 +7,7 @@ def celeba(path, batch_size=64):
         transforms.Resize(64),
         transforms.CenterCrop(64),
         transforms.ToTensor(),
-        #transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
 
     dataset = torchvision.datasets.ImageFolder(path, transformation)

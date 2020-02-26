@@ -22,13 +22,13 @@ class Generator(nn.Module):
         )
 
         self.conv   = nn.Sequential(
-            nn.Conv2d(128, 128, 3, stride=1, padding=1),
+            nn.Conv2d(128, 128, 3, stride=1, padding=1, bias=False),
             nn.LeakyReLU(),
 
             nn.UpsamplingBilinear2d(size=32),
             nn.BatchNorm2d(128),
 
-            nn.Conv2d(128, 64, 3, stride=1, padding=1),
+            nn.Conv2d(128, 64, 3, stride=1, padding=1, bias=False),
             nn.LeakyReLU(),
             
             nn.UpsamplingBilinear2d(size=64),
@@ -41,7 +41,8 @@ class Generator(nn.Module):
             nn.LeakyReLU(),
             
             nn.Conv2d(64, 3, 3, stride=1, padding=1),
-            nn.Sigmoid(),
+            #nn.Sigmoid(),
+            nn.Tanh(),
         )
 
     def forward(self, x):
@@ -116,6 +117,10 @@ class WGAN():
     def train(self, dataloader, epochs=100, n_critic=5):
         for i in range(epochs):
             self._run_epoch(dataloader, n_critic=n_critic)
+            
+            # Checkpoints
+            torch.save(self.G.state_dict(), "./celeba-gen.pt")
+            torch.save(self.C.state_dict(), "./celeba-cri.pt")
 
     def _run_epoch(self, dataloader, n_critic=5):
         for i, (real_data, _) in enumerate(dataloader): 
@@ -220,8 +225,9 @@ class WGAN():
     def _sample_to_disk(self):
         img = np.transpose(vutils.make_grid(self.G(self.seeds).detach().cpu(), padding=2,
                                                  normalize=True), (1, 2, 0))
-        
-        self.images.append((img.numpy() * 255.0).astype(np.uint8))
+        img = img.numpy()
+        img = (img + 0.5) * 0.5
+        self.images.append((img * 255.0).astype(np.uint8))
         imageio.mimsave("./gan.gif", self.images)
 
 if __name__ == '__main__':
