@@ -41,7 +41,6 @@ class Generator(nn.Module):
             nn.LeakyReLU(),
             
             nn.Conv2d(64, 3, 3, stride=1, padding=1),
-            #nn.Sigmoid(),
             nn.Tanh(),
         )
 
@@ -57,32 +56,27 @@ class Critic(nn.Module):
         super(Critic, self).__init__()
 
         self.net = nn.Sequential(
-            nn.Conv2d(3, 64, 4, stride=2, padding=1),
+            nn.Conv2d(3, 128, 4, stride=2, padding=1),
+            nn.InstanceNorm2d(128),
             nn.LeakyReLU(),
 
-            nn.Conv2d(64, 128, 4, stride=2, padding=1), 
-            #nn.BatchNorm2d(128),
+            nn.Conv2d(128, 256, 4, stride=2, padding=1), 
+            nn.InstanceNorm2d(256),
             nn.LeakyReLU(),
 
-            nn.Conv2d(128, 256, 4, stride=2, padding=1),
-            #nn.BatchNorm2d(256),
+            nn.Conv2d(256, 512, 4, stride=2, padding=1),
+            nn.InstanceNorm2d(512),
             nn.LeakyReLU(),
             
-            nn.Conv2d(256, 512, 4, stride=2, padding=1), 
-            #nn.BatchNorm2d(512),
+            nn.Conv2d(512, 1024, 4, stride=2, padding=1), 
+            nn.InstanceNorm2d(1024),
             nn.LeakyReLU(),
 
-            nn.Conv2d(512, 1024, 4, stride=2, padding=1),
-        )
-
-        self.linear = nn.Sequential(
-            nn.Linear(1024*4, 1) 
+            nn.Conv2d(1024, 1, 4, stride=1, padding=0)
         )
 
     def forward(self, x):
         x = self.net(x)
-        x = x.view(x.size(0), 1024*4)
-        x = self.linear(x)
         return x
 
 class WGAN():
@@ -112,7 +106,6 @@ class WGAN():
 
         self.seeds = torch.randn((64, 256))
         self.seeds = self.seeds.cuda() if self.cuda else self.seeds
-        self.images = []
 
     def train(self, dataloader, epochs=100, n_critic=5):
         for i in range(epochs):
@@ -142,9 +135,10 @@ class WGAN():
                 print("STEP {}: C_LOSS {} - G_LOSS {} - LP {}".format(i, c_loss,
                                                                       g_loss, lp))
                 sys.stdout.flush()
-
-            if i % 200 == 0:
                 self._sample_to_disk()
+
+            #if i % 200 == 0:
+            #    self._sample_to_disk()
 
     def _critic_step(self, data, gen_data, batch_size):
         self.c_opt.zero_grad()
@@ -223,12 +217,12 @@ class WGAN():
         return inter
     
     def _sample_to_disk(self):
-        img = np.transpose(vutils.make_grid(self.G(self.seeds).detach().cpu(), padding=2,
-                                                 normalize=True), (1, 2, 0))
-        img = img.numpy()
-        img = (img + 0.5) * 0.5
-        self.images.append((img * 255.0).astype(np.uint8))
-        imageio.mimsave("./gan.gif", self.images)
+        samples = self.G(self.seeds)
+        samples = samples.mul(0.5).add(0.5)
+        samples = samples.detach().cpu()
+        
+        grid = vutils.make_grid(samples, padding=2, normalize=True)
+        vutils.save_image(grid, "./gan_sample.png") 
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
@@ -238,7 +232,7 @@ if __name__ == '__main__':
     x = gen.forward(torch.randn((1, 256)))
     y = cri.forward(x)
 
-    print(y)
+    print(y.shape)
 
     #plt.imshow(np.transpose(y[0].detach().numpy(), (1, 2, 0)))
     #plt.show()
