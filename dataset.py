@@ -4,8 +4,8 @@ import torchvision.transforms as transforms
 
 def celeba(path, batch_size=64):
     transformation = transforms.Compose([
+        transforms.CenterCrop(128),
         transforms.Resize(64),
-        transforms.CenterCrop(64),
         transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
