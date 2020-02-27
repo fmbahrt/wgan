@@ -107,15 +107,20 @@ class WGAN():
         self.seeds = torch.randn((64, 256))
         self.seeds = self.seeds.cuda() if self.cuda else self.seeds
 
-    def train(self, dataloader, epochs=100, n_critic=5):
+        self.g_iters = 0
+
+    def train(self, dataloader, epochs=100, n_critic=5, check_interval=1000):
         for i in range(epochs):
-            self._run_epoch(dataloader, n_critic=n_critic)
+            self._run_epoch(dataloader,
+                            n_critic=n_critic,
+                            check_interval=check_interval)
             
             # Checkpoints
+            self._sample_to_disk()
             torch.save(self.G.state_dict(), "./celeba-gen.pt")
             torch.save(self.C.state_dict(), "./celeba-cri.pt")
 
-    def _run_epoch(self, dataloader, n_critic=5):
+    def _run_epoch(self, dataloader, n_critic=5, check_interval=1000):
         for i, (real_data, _) in enumerate(dataloader): 
             batch_size = real_data.size(0)
 
@@ -127,18 +132,24 @@ class WGAN():
             z = z.cuda() if self.cuda else z
             gen_data = self.G(z)
 
-            c_loss, lp = self._critic_step(real_data, gen_data, batch_size)
+            c_loss, lp, l_grad = self._critic_step(real_data, gen_data, batch_size)
 
             if i % n_critic == 0:
                 g_loss = self._generator_step(gen_data, batch_size)
+                self.g_iters += 1
 
-                print("STEP {}: C_LOSS {} - G_LOSS {} - LP {}".format(i, c_loss,
-                                                                      g_loss, lp))
+            if self.g_iters % check_interval == 0:
+                print("-- GENERTOR STEP: {} -------------------".format(self.g_iters)) 
+                print(" CRITIC LOSS           : {}".format(-c_loss))
+                print(" GENERATOR LOSS        : {}".format(g_loss))
+                print(" LIPSCHITZ PENALTY     : {}".format(lp))
+                print(" LARGEST GRADIENT NORM : {}".format(l_grad))
+                
                 sys.stdout.flush()
-                self._sample_to_disk()
 
-            #if i % 200 == 0:
-            #    self._sample_to_disk()
+                self._sample_to_disk()
+                torch.save(self.G.state_dict(), "./celeba-gen.pt")
+                torch.save(self.C.state_dict(), "./celeba-cri.pt")
 
     def _critic_step(self, data, gen_data, batch_size):
         self.c_opt.zero_grad()
@@ -148,7 +159,7 @@ class WGAN():
         gen_data = gen_data.detach()
 
         # Lipscitz Penalty
-        lp = self._lipschitz_penalty(data, gen_data, batch_size)
+        lp, l_grad = self._lipschitz_penalty(data, gen_data, batch_size)
 
         # Calculate Loss
         c_loss = self.C(gen_data).mean() - self.C(data).mean() + lp
@@ -157,7 +168,7 @@ class WGAN():
         c_loss.backward()
         self.c_opt.step()
 
-        return c_loss, lp
+        return c_loss, lp, l_grad
 
     def _generator_step(self, gen_data, batch_size):
         self.g_opt.zero_grad()
@@ -194,14 +205,15 @@ class WGAN():
         
         # Calculate gradient norms
         g_norms = torch.sqrt(torch.sum(grads**2, dim=1) + 1e-12)
-        
+        l_grad = torch.max(g_norms) 
+
         # Time for LP :-)
         zeros   = torch.zeros(g_norms.size())
         zeros   = zeros.cuda() if self.cuda else zeros
         
         g_norms = torch.max(zeros, g_norms-1) ** 2
         lp = lamb * g_norms.mean()
-        return lp
+        return lp, l_grad
 
     def _sample_tau(self, real, fake, batch_size):
         # Sample from the joint distribution
