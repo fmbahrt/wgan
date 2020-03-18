@@ -3,6 +3,7 @@ import torch
 import torch.utils.data as data
 import torchvision
 import torchvision.transforms as transforms
+import numpy as np
 
 from PIL import Image
 
@@ -109,8 +110,9 @@ class TwoAFCDataset(data.Dataset):
         ref_img  = Image.open(ref_path).convert('RGB')
 
         judge_path = self.judge_paths[idx]
-        judge_lbl  = np.load(judge_path).reshape((1, 1, 1, ))
-        
+        #judge_lbl  = np.load(judge_path).reshape((1, 1, 1, ))
+        judge_lbl  = np.load(judge_path)
+         
         if self.tf:
             p0_img = self.transform(p0_img)
             p1_img = self.transform(p1_img)
@@ -124,21 +126,37 @@ class TwoAFCDataset(data.Dataset):
             'judge' : judge_lbl
         }
 
+def twoafc(dataroots, batch_size=8):
+    dataset    = TwoAFCDataset(dataroots)
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        pin_memory=True,
+        shuffle=True,
+        num_workers=8,
+        drop_last=True
+    )
+    return dataloader
+
 if __name__ == '__main__':
     import numpy as np
     import matplotlib.pyplot as plt
     import torchvision.utils as vutils
 
-    dataset = TwoAFCDataset('./dataset/2afc/train/traditional', tf=False)
-    
-    for i in range(20):
-        item = dataset.__getitem__(i)
-        print(item['judge'])
-        f, ax = plt.subplots(1, 3)
-        ax[0].imshow(item['p0'])
-        ax[1].imshow(item['ref'])
-        ax[2].imshow(item['p1'])
-        plt.show()
+    it = iter(twoafc('./dataset/2afc/train/traditional'))
+    batch = next(it)
+    print(batch)
+
+    #dataset = TwoAFCDataset('./dataset/2afc/train/traditional', tf=False)
+    #
+    #for i in range(20):
+    #    item = dataset.__getitem__(i)
+    #    print(item['judge'])
+    #    f, ax = plt.subplots(1, 3)
+    #    ax[0].imshow(item['p0'])
+    #    ax[1].imshow(item['ref'])
+    #    ax[2].imshow(item['p1'])
+    #    plt.show()
 
     #it = iter(celeba('/home/frederik/Documents/diku/bscthesis/data/celeba'))
     #batch = next(it)

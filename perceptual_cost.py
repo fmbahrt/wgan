@@ -216,19 +216,19 @@ class MultiChannelCost(nn.Module):
 
 class WeightedSigmoidBCE(nn.Module):
 
-    def __init__(self, blocksize=8):
+    def __init__(self):
         super(WeightedSigmoidBCE, self).__init__()
         
         self.w_tilde = torch.Tensor([1.])
         self.w_tilde = nn.Parameter(self.w_tilde)
-        self.half    = torch.Tensor(.5)
+        self.half    = torch.Tensor([0.5])
         self.loss    = torch.nn.BCELoss()
 
     @property
     def w(self):
         return torch.exp(self.w_tilde)
 
-    def G(d0, d1):
+    def G(self, d0, d1):
         """Compute Ranking Probability"""
         # I guess it is safe to assume d0 > 0 & d1 > 0
         #  since the cost is metric
@@ -238,24 +238,62 @@ class WeightedSigmoidBCE(nn.Module):
         w_sigmoid   = torch.sigmoid(self.w * normed_diff)
         return w_sigmoid
 
-    def forward(d0, d1, judge):
+    def forward(self, d0, d1, judge):
         return self.loss(self.G(d0, d1), judge)
 
 class CostTrainingHarness:
 
-    def __init__(self, cost, gpu=True):
-        self.gpu  = gpu
-        self.cost = cost
+    def __init__(self, cuda=True):
+        self.cuda = cuda
+        self.cost = MultiChannelCost()
+        self.loss = WeightedSigmoidBCE()
+
+        self.cost = self.cost.cuda() if cuda else self.cost
+        self.loss = self.loss.cuda() if cuda else self.loss
+
+        self.parameters  = list(self.cost.parameters())
+        self.parameters += list(self.loss.parameters()) 
 
         self.opt = torch.optim.Adam(
-            self.cost.parameters(),
-            lr=1e-3,
+            self.parameters,
+            lr=1e-4,
             weight_decay=1e-3 # Tweak this
         )
 
     def train(self, dataloader, epochs=100):
-        return
+        for epoch in range(epochs):
+            for i, data in enumerate(dataloader):
+                # Start by resetting grads
+                self.opt.zero_grad()
 
+                # Unpack data
+                ref   = data['ref']
+                p0    = data['p0']
+                p1    = data['p1']
+                judge = data['judge']
+
+                ref   = ref.cuda()   if self.cuda else ref
+                p0    = p0.cuda()    if self.cuda else p0
+                p1    = p1.cuda()    if self.cuda else p1
+                judge = judge.cuda() if self.cuda else judge
+
+                # Compute distances
+                d0 = self.cost(ref, p0)
+                d1 = self.cost(ref, p1)
+                
+                # Compute loss
+                loss = self.loss(d0, d1, judge)
+                loss = torch.mean(loss)
+
+                # Backprop
+                loss.backward()
+                self.opt.step()
+
+                #.format(epoch, i, loss) Print - should be writing to file
+                print("Epoch : {} iteration : {}  -- Loss : {}".format(epoch,
+                                                                       i, loss))
+                if i > 10:
+                    break
 if __name__ == '__main__':
     img1 = torch.randn((2, 3, 64, 64))
     img2 = torch.randn((2, 3, 64, 64))
