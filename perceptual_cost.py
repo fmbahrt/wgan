@@ -88,11 +88,11 @@ class PerceptualCost(nn.Module):
 
     @property
     def p_2(self):
-        return 1. - torch.exp(self.p_2_tilde)
+        return 1. + torch.exp(self.p_2_tilde)
     
     @property
     def p_3(self):
-        return 1. - torch.exp(self.p_3_tilde)
+        return 1. + torch.exp(self.p_3_tilde)
 
     def forward(self, img1, img2):
 
