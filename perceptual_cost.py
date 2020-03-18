@@ -67,11 +67,11 @@ class PerceptualCost(nn.Module):
         self.alpha_2 = nn.Parameter(torch.tensor(1.), requires_grad=True)
         self.alpha_3 = nn.Parameter(torch.tensor(1.), requires_grad=True)
 
-        self.p_1 = nn.Parameter(torch.tensor(1.), requires_grad=True)
+        self.p_1_tilde = nn.Parameter(torch.tensor(1.), requires_grad=True)
         self.p_2_tilde = nn.Parameter(torch.tensor(1.), requires_grad=True)
         self.p_3_tilde = nn.Parameter(torch.tensor(1.), requires_grad=True)
 
-        #  Sensitivity table half size due to rfft
+        # Sensitivity table half size due to rfft
         tsize  = (blocksize, blocksize//2+1)
         self.T_tilde = nn.Parameter(torch.ones(tsize), requires_grad=True)
 
@@ -85,6 +85,10 @@ class PerceptualCost(nn.Module):
     @property
     def W(self):
         return torch.exp(self.W_tilde)
+
+    @property
+    def p_1(self):
+        return 1. + torch.exp(self.p_1_tilde)
 
     @property
     def p_2(self):
@@ -122,7 +126,7 @@ class PerceptualCost(nn.Module):
         # Normalized block intensities
         C0_00_tilde = C0_00 / (C0_bar.view(N, 1, 1, 1) + EPS)
         C1_00_tilde = C1_00 / (C1_bar.view(N, 1, 1, 1) + EPS)
-
+        
         l1 = self.alpha_1 * self._luminance_loss(C0_bar, C1_bar)
         
         l2 = self.alpha_2 * self._block_luminance_loss(C0_00_tilde,
@@ -131,7 +135,7 @@ class PerceptualCost(nn.Module):
                                                  C1_tilde,
                                                  (N, K, H, W))
         percep_dist = l1 + l2 + l3
-
+        
         # Phase part - this is basically just copied from the reference
         #   implementation
         # get phases
@@ -205,13 +209,13 @@ class MultiChannelCost(nn.Module):
     def forward(self, img1, img2):
         ins = self.to_YCbCr(img1)
         tar = self.to_YCbCr(img2)
-
+        
         ly  = self.ly(ins[:, [0], :, :], tar[:, [0], :, :])
         lcb = self.lcb(ins[:, [1], :, :], tar[:, [1], :, :])
         lcr = self.lcr(ins[:, [2], :, :], tar[:, [2], :, :])
-
+         
         l = self.l
-
+        
         return ly * l[0] + lcb * l[1] + lcr * l[2]
 
 class WeightedSigmoidBCE(nn.Module):
@@ -221,7 +225,7 @@ class WeightedSigmoidBCE(nn.Module):
         
         self.w_tilde = torch.Tensor([1.])
         self.w_tilde = nn.Parameter(self.w_tilde)
-        self.half    = torch.Tensor([0.5])
+        self.zero    = torch.Tensor([0.])
         self.loss    = torch.nn.BCELoss()
 
     @property
@@ -230,11 +234,10 @@ class WeightedSigmoidBCE(nn.Module):
 
     def G(self, d0, d1):
         """Compute Ranking Probability"""
-        # I guess it is safe to assume d0 > 0 & d1 > 0
+        # I guess it is safe to assume d0 >= 0 & d1 >= 0
         #  since the cost is metric
-
-        normed_diff = (d1 - d0) / d1 + d0
-        normed_diff = torch.where((d0+d1) > 0., normed_diff, self.half)
+        normed_diff = (d1 - d0) / (d1 + d0 + EPS)
+        normed_diff = torch.where((d0+d1) > 0., normed_diff, self.zero)
         w_sigmoid   = torch.sigmoid(self.w * normed_diff)
         return w_sigmoid
 
@@ -247,13 +250,13 @@ class CostTrainingHarness:
         self.cuda = cuda
         self.cost = MultiChannelCost()
         self.loss = WeightedSigmoidBCE()
-
+    
         self.cost = self.cost.cuda() if cuda else self.cost
         self.loss = self.loss.cuda() if cuda else self.loss
 
         self.parameters  = list(self.cost.parameters())
         self.parameters += list(self.loss.parameters()) 
-
+        
         self.opt = torch.optim.Adam(
             self.parameters,
             lr=1e-4,
@@ -283,8 +286,7 @@ class CostTrainingHarness:
                 
                 # Compute loss
                 loss = self.loss(d0, d1, judge)
-                loss = torch.mean(loss)
-
+                
                 # Backprop
                 loss.backward()
                 self.opt.step()
@@ -292,13 +294,18 @@ class CostTrainingHarness:
                 #.format(epoch, i, loss) Print - should be writing to file
                 print("Epoch : {} iteration : {}  -- Loss : {}".format(epoch,
                                                                        i, loss))
-                if i > 10:
+                if i > 5:
                     break
 if __name__ == '__main__':
-    img1 = torch.randn((2, 3, 64, 64))
-    img2 = torch.randn((2, 3, 64, 64))
+    img1 = torch.randn((1, 3, 64, 64))
+    img2 = torch.randn((1, 3, 64, 64))
+    img3 = torch.randn((1, 3, 64, 64))
 
     p = MultiChannelCost()
+    p.register_backward_hook(lambda s, x, y: print(s, x, y))
     
-    print(p.forward(img1, img2))
-
+    c = WeightedSigmoidBCE()
+    c.register_backward_hook(lambda s, x, y: print(s, x, y))
+    
+    loss = c(p(img1, img2), p(img1, img3), torch.Tensor([1.]))
+    loss.backward()
