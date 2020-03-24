@@ -90,7 +90,7 @@ class TwoAFCDataset(data.Dataset):
 
         # Transformations
         transform_list = [
-            transforms.Scale(loadsize),
+            transforms.Resize(loadsize),
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5),(0.5, 0.5, 0.5))
         ]
@@ -145,7 +145,16 @@ if __name__ == '__main__':
 
     it = iter(twoafc('./dataset/2afc/train/traditional'))
     batch = next(it)
-    print(batch)
+
+    ref = batch['ref'][0].numpy().transpose(2,1,0)
+    p0  = batch['p0'][0].numpy().transpose(2,1,0)
+    p1  = batch['p1'][0].numpy().transpose(2,1,0)
+    print(batch['judge'][0]) 
+    f, ax = plt.subplots(1, 3)
+    ax[0].imshow(p0)
+    ax[1].imshow(ref)
+    ax[2].imshow(p1)
+    plt.show()
 
     #dataset = TwoAFCDataset('./dataset/2afc/train/traditional', tf=False)
     #
