@@ -110,7 +110,6 @@ class TwoAFCDataset(data.Dataset):
         ref_img  = Image.open(ref_path).convert('RGB')
 
         judge_path = self.judge_paths[idx]
-        #judge_lbl  = np.load(judge_path).reshape((1, 1, 1, ))
         judge_lbl  = np.load(judge_path)
          
         if self.tf:

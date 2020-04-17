@@ -1,3 +1,4 @@
+import os
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
@@ -17,3 +18,9 @@ class Visualizer:
         sns_plot = sns.relplot(x=x_name, y=y_name, ci=None, kind="line",
                                data=self.df)
         sns_plot.savefig(self.path)
+
+        # index
+        path = os.path.split(self.path)
+        name = path[1].split('.')[0]
+        csv_path = os.path.join(path[0], name+".csv")
+        self.df.to_csv(csv_path, index=False, header=True)

@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 from utils import Visualizer
 
-EPS = 1e-10
+EPS = 1e-8
 #EPS = 1e-6
 
 class Rfft2d(nn.Module):
@@ -336,9 +336,7 @@ class WeightedSigmoidBCE(nn.Module):
     def __init__(self):
         super(WeightedSigmoidBCE, self).__init__()
         
-        self.w_tilde = torch.Tensor([0.])
-        self.w_tilde = nn.Parameter(self.w_tilde)
-        self.zero    = torch.Tensor([0.])
+        self.w_tilde = nn.Parameter(torch.Tensor([1.]))
         self.loss    = torch.nn.BCEWithLogitsLoss()
 
     @property
@@ -349,12 +347,13 @@ class WeightedSigmoidBCE(nn.Module):
         """Compute Ranking Probability"""
         # I guess it is safe to assume d0 >= 0 & d1 >= 0
         #  since the cost is metric
-        normed_diff = (d1 - d0) / (d1 + d0 + EPS)
+        normed_diff = (d0 - d1) / (d0 + d1 + EPS)
         return self.w * normed_diff
 
     def forward(self, d0, d1, judge):
+        print(self.w)
         g_logits = self.G(d0, d1)
-        return self.loss(g_logits.view(-1, 1), judge)
+        return self.loss(g_logits.view(-1,1), judge.view(-1,1))
 
 class CostTrainingHarness:
 
@@ -369,16 +368,27 @@ class CostTrainingHarness:
         self.parameters  = list(self.cost.parameters())
         self.parameters += list(self.loss.parameters()) 
         
+        self.lr = 0.0002
+        self.old_lr = self.lr
+        
+        #self.opt = torch.optim.SGD(
+        #    self.parameters,
+        #    lr=self.lr,
+        #    momentum=0.99,
+        #    nesterov=True
+        #)
         self.opt = torch.optim.Adam(
             self.parameters,
-            lr=0.00001,
-            weight_decay=0. # Tweak this
+            lr=self.lr,
+            betas=(0.5, 0.999)
+            #weight_decay=0.00001 # Tweak this
         )
 
         # Utils
         self.total_its = 1
         self.vis_nstep = 20
-        self.vis = Visualizer("./checkpoint/perceptual_cost/loss_function.png")
+        self.vis = Visualizer("./checkpoint/perceptual_cost/loss_history.png")
+        self.acc_vis = Visualizer("./checkpoint/perceptual_cost/acc_history.png")
     
     def compute_accuracy(self,d0,d1,judge):
         ''' d0, d1 are Variables, judge is a Tensor '''
@@ -386,6 +396,18 @@ class CostTrainingHarness:
         judge_per = judge.cpu().numpy().flatten()
         acc_r = d1_lt_d0*judge_per + (1-d1_lt_d0)*(1-judge_per)
         return np.mean(acc_r)
+
+    def update_lr(self, epoch_decay):
+        lrd = self.lr / epoch_decay
+        lr = self.lr - lrd
+
+        for p_group in self.opt.param_groups:
+            p_group['lr'] = lr
+        self.old_lr = lr
+
+    def checkpoint(self):
+        torch.save(self.cost.state_dict(),
+                   "./checkpoint/perceptual_cost/model_checkpoint.pt")
 
     def train(self, dataloader, epochs=100):
         for epoch in range(epochs):
@@ -407,7 +429,7 @@ class CostTrainingHarness:
                 # Compute distances
                 d0 = self.cost(ref, p0)
                 d1 = self.cost(ref, p1)
-               
+              
                 # Compute Accuracy
                 acc = self.compute_accuracy(d0, d1, judge)
 
@@ -422,7 +444,6 @@ class CostTrainingHarness:
                 print("Epoch : {} iteration : {}  -- Loss : {} -- Accurcay : {}".format(epoch,
                                                                        i, loss, acc))
 
-                self.total_its += 1
                 # Utils
                 if i % self.vis_nstep == 0:
                     self.vis.append_data({
@@ -430,6 +451,18 @@ class CostTrainingHarness:
                         "loss"     : [float(loss.detach().numpy())]
                     })
                     self.vis.plot_and_save("iteration", "loss")
+
+                    self.acc_vis.append_data({
+                        "iteration": self.total_its,
+                        "loss"     : [acc]
+                    }) 
+                    self.acc_vis.plot_and_save("iteration", "loss")
+
+                    self.checkpoint()
+                self.total_its += 1
+        if epoch > 2:
+            self.update_lr(10)
+        self.checkpoint()
 
 if __name__ == '__main__':
     from torchviz import make_dot
