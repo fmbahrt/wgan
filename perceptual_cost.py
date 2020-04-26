@@ -6,7 +6,19 @@ import torch.nn.functional as F
 from utils import Visualizer
 
 EPS = 1e-8
-#EPS = 1e-6
+
+class FakeNet(nn.Module):
+    def __init__(self, use_gpu=True):
+        super(FakeNet, self).__init__()
+        self.use_gpu = use_gpu
+
+class L2(FakeNet):
+
+    def forward(self, in0, in1):
+        # Assume rgb image
+        (N,C,X,Y) = in0.size()
+        value = torch.mean(torch.mean(torch.mean((in0-in1)**2,dim=1).view(N,1,X,Y),dim=2).view(N,1,1,Y),dim=3).view(N)
+        return value
 
 class Rfft2d(nn.Module):
     # This is not my code, credit: ?
@@ -368,21 +380,21 @@ class CostTrainingHarness:
         self.parameters  = list(self.cost.parameters())
         self.parameters += list(self.loss.parameters()) 
         
-        self.lr = 0.0002
+        self.lr = 0.001
         self.old_lr = self.lr
         
-        #self.opt = torch.optim.SGD(
-        #    self.parameters,
-        #    lr=self.lr,
-        #    momentum=0.99,
-        #    nesterov=True
-        #)
-        self.opt = torch.optim.Adam(
+        self.opt = torch.optim.SGD(
             self.parameters,
             lr=self.lr,
-            betas=(0.5, 0.999)
-            #weight_decay=0.00001 # Tweak this
+            momentum=0.99,
+            nesterov=True
         )
+        #self.opt = torch.optim.Adam(
+        #    self.parameters,
+        #    lr=self.lr,
+        #    betas=(0.5, 0.999)
+        #    #weight_decay=0.00001 # Tweak this
+        #)
 
         # Utils
         self.total_its = 1

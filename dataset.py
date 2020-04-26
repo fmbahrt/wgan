@@ -125,15 +125,15 @@ class TwoAFCDataset(data.Dataset):
             'judge' : judge_lbl
         }
 
-def twoafc(dataroots, batch_size=8):
+def twoafc(dataroots, batch_size=8, shuffle=True, drop_last=True):
     dataset    = TwoAFCDataset(dataroots)
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
         pin_memory=True,
-        shuffle=True,
+        shuffle=shuffle,
         num_workers=8,
-        drop_last=True
+        drop_last=drop_last
     )
     return dataloader
 

@@ -9,6 +9,8 @@ import imageio
 import numpy as np
 import torchvision.utils as vutils
 
+from abc import ABC, abstractmethod
+
 class Generator(nn.Module):
 
     def __init__(self):
@@ -79,12 +81,15 @@ class Critic(nn.Module):
         x = self.net(x)
         return x
 
-class WGAN():
+class WGAN(ABC):
+
+    # Wasserstein GAN base class
 
     def __init__(
         self,
         generator,
         critic,
+        ground_metric=None,
         cuda=True
     ):
 
@@ -103,6 +108,8 @@ class WGAN():
 
         self.G = self.G.cuda() if self.cuda else self.G
         self.C = self.C.cuda() if self.cuda else self.C
+
+        self.ground_metric = ground_metric
 
         self.seeds = torch.randn((64, 256))
         self.seeds = self.seeds.cuda() if self.cuda else self.seeds
@@ -184,6 +191,20 @@ class WGAN():
 
         return g_loss
 
+    def _sample_to_disk(self):
+        samples = self.G(self.seeds)
+        samples = samples.mul(0.5).add(0.5)
+        samples = samples.detach().cpu()
+        
+        grid = vutils.make_grid(samples, padding=2, normalize=True)
+        vutils.save_image(grid, "./gan_sample.png") 
+    
+    @abstractmethod
+    def _lipschitz_penalty(self, real, fake, batch_size, lamb=10):
+        pass 
+
+class WGANLP(WGAN):
+
     def _lipschitz_penalty(self, real, fake, batch_size, lamb=10):
         inter = self._sample_tau(real, fake, batch_size)
 
@@ -227,24 +248,17 @@ class WGAN():
         inter = inter.cuda() if self.cuda else inter
         inter.requires_grad=True 
         return inter
-    
-    def _sample_to_disk(self):
-        samples = self.G(self.seeds)
-        samples = samples.mul(0.5).add(0.5)
-        samples = samples.detach().cpu()
+
+class WWGAN(WGAN):
+
+    def _lipschitz_penalty(self, real, fake, batch_size, lamb=10):
+        phi_real = self.C(real).view(-1)
+        phi_fake = self.C(fake).view(-1)
+
+        per_dist = self.ground_metric(real, fake)
         
-        grid = vutils.make_grid(samples, padding=2, normalize=True)
-        vutils.save_image(grid, "./gan_sample.png") 
-
-if __name__ == '__main__':
-    import matplotlib.pyplot as plt
-    gen = Generator()
-    cri = Critic()
-    print(cri)
-    x = gen.forward(torch.randn((1, 256)))
-    y = cri.forward(x)
-
-    print(y.shape)
-
-    #plt.imshow(np.transpose(y[0].detach().numpy(), (1, 2, 0)))
-    #plt.show()
+        lip_slope = (phi_real - phi_fake).abs() / per_dist
+        zeros = torch.zeros(lip_slope.size())
+        
+        penalties = torch.max(zeros, lip_slope - 1.) ** 2.
+        return (lamb * penalties.mean()), 0
