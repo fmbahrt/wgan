@@ -5,11 +5,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import imageio
-
 import numpy as np
 import torchvision.utils as vutils
 
+from tqdm import tqdm
 from abc import ABC, abstractmethod
+
+from utils import GANVisualizer
 
 class Generator(nn.Module):
 
@@ -89,9 +91,12 @@ class WGAN(ABC):
         self,
         generator,
         critic,
+        name,
         ground_metric=None,
         cuda=True
     ):
+        
+        self.viz = GANVisualizer('./checkpoint', name)
 
         self.cuda = cuda
 
@@ -118,6 +123,7 @@ class WGAN(ABC):
 
     def train(self, dataloader, epochs=100, n_critic=5, check_interval=1000):
         for i in range(epochs):
+            print("EPOCH: {}/{}".format(i+1, epochs))
             self._run_epoch(dataloader,
                             n_critic=n_critic,
                             check_interval=check_interval)
@@ -128,7 +134,7 @@ class WGAN(ABC):
             torch.save(self.C.state_dict(), "./celeba-cri.pt")
 
     def _run_epoch(self, dataloader, n_critic=5, check_interval=1000):
-        for i, (real_data, _) in enumerate(dataloader): 
+        for i, (real_data, _) in enumerate(tqdm(dataloader)): 
             batch_size = real_data.size(0)
 
             # Sample real data
@@ -145,18 +151,22 @@ class WGAN(ABC):
                 g_loss = self._generator_step(gen_data, batch_size)
                 self.g_iters += 1
 
-            if self.g_iters % check_interval == 0:
-                print("-- GENERTOR STEP: {} -------------------".format(self.g_iters)) 
-                print(" CRITIC LOSS           : {}".format(-c_loss))
-                print(" GENERATOR LOSS        : {}".format(g_loss))
-                print(" LIPSCHITZ PENALTY     : {}".format(lp))
-                print(" LARGEST GRADIENT NORM : {}".format(l_grad))
-                
-                sys.stdout.flush()
+                if self.g_iters % check_interval == 0:
+                    #print("-- GENERTOR STEP: {} -------------------".format(self.g_iters)) 
+                    #print(" CRITIC LOSS           : {}".format(-c_loss))
+                    #print(" GENERATOR LOSS        : {}".format(g_loss))
+                    #print(" LIPSCHITZ PENALTY     : {}".format(lp))
+                    #print(" LARGEST GRADIENT NORM : {}".format(l_grad))
+                    #
+                    #sys.stdout.flush()
 
-                self._sample_to_disk()
-                torch.save(self.G.state_dict(), "./celeba-gen.pt")
-                torch.save(self.C.state_dict(), "./celeba-cri.pt")
+                    imgz = self._sample_to_disk()
+
+                    self.viz.add_step(self.g_iters, -c_loss, imgz)
+                    self.viz.commit()
+
+                    torch.save(self.G.state_dict(), "./celeba-gen.pt")
+                    torch.save(self.C.state_dict(), "./celeba-cri.pt")
 
     def _critic_step(self, data, gen_data, batch_size):
         self.c_opt.zero_grad()
@@ -197,13 +207,28 @@ class WGAN(ABC):
         samples = samples.detach().cpu()
         
         grid = vutils.make_grid(samples, padding=2, normalize=True)
-        vutils.save_image(grid, "./gan_sample.png") 
+        vutils.save_image(grid, "./gan_sample.png")
+        return grid
     
     @abstractmethod
     def _lipschitz_penalty(self, real, fake, batch_size, lamb=10):
         pass 
 
-class WGANLP(WGAN):
+class TauMixin:
+    def _sample_tau(self, real, fake, batch_size):
+        # Sample from the joint distribution
+
+        # generate epsilons
+        eps = torch.rand(batch_size, 1, 1, 1)
+        eps = eps.cuda() if self.cuda else eps
+
+        # interpolate 
+        inter = eps * real + (1 - eps) * fake
+        inter = inter.cuda() if self.cuda else inter
+        inter.requires_grad=True 
+        return inter
+
+class WGANLP(WGAN, TauMixin):
 
     def _lipschitz_penalty(self, real, fake, batch_size, lamb=10):
         inter = self._sample_tau(real, fake, batch_size)
@@ -236,21 +261,8 @@ class WGANLP(WGAN):
         lp = lamb * g_norms.mean()
         return lp, l_grad
 
-    def _sample_tau(self, real, fake, batch_size):
-        # Sample from the joint distribution
 
-        # generate epsilons
-        eps = torch.rand(batch_size, 1, 1, 1)
-        eps = eps.cuda() if self.cuda else eps
-
-        # interpolate 
-        inter = eps * real + (1 - eps) * fake
-        inter = inter.cuda() if self.cuda else inter
-        inter.requires_grad=True 
-        return inter
-
-class WWGAN(WGAN):
-
+class WWGAN(WGAN): 
     def _lipschitz_penalty(self, real, fake, batch_size, lamb=10):
         phi_real = self.C(real).view(-1)
         phi_fake = self.C(fake).view(-1)
