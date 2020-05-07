@@ -186,26 +186,31 @@ class PerceptualCost2(nn.Module):
     
 class PerceptualCost(nn.Module):
 
-    def __init__(self, blocksize=8):
+    def __init__(self, blocksize=8, trainable=True):
         super(PerceptualCost, self).__init__()
+
+        self.trainable = trainable
+        
+        self.weight_size = (blocksize, blocksize // 2 + 1)
 
         self.add_module('fft', Rfft2d(blocksize=blocksize, interleaving=False))
 
         # Learnable Paramters
-        self.alpha_1 = nn.Parameter(torch.tensor(0.), requires_grad=True)
-        self.alpha_2 = nn.Parameter(torch.tensor(0.), requires_grad=True)
-        self.alpha_3 = nn.Parameter(torch.tensor(0.), requires_grad=True)
+        self.alpha_1 = nn.Parameter(torch.tensor(0.), requires_grad=trainable)
+        self.alpha_2 = nn.Parameter(torch.tensor(0.), requires_grad=trainable)
+        self.alpha_3 = nn.Parameter(torch.tensor(0.), requires_grad=trainable)
 
-        self.p_1_tilde = nn.Parameter(torch.tensor(0.), requires_grad=True)
-        self.p_2_tilde = nn.Parameter(torch.tensor(0.), requires_grad=True)
-        self.p_3_tilde = nn.Parameter(torch.tensor(0.), requires_grad=True)
+        self.p_1_tilde = nn.Parameter(torch.tensor(0.), requires_grad=trainable)
+        self.p_2_tilde = nn.Parameter(torch.tensor(0.), requires_grad=trainable)
+        self.p_3_tilde = nn.Parameter(torch.tensor(0.), requires_grad=trainable)
 
         # Sensitivity table half size due to rfft
         tsize  = (blocksize, blocksize//2+1)
-        self.T_tilde = nn.Parameter(torch.zeros(tsize), requires_grad=True)
+        self.T_tilde = nn.Parameter(torch.zeros(tsize), requires_grad=trainable)
         
         # Phase weights
-        self.W_tilde = nn.Parameter(torch.zeros(tsize), requires_grad=True)
+        self.W_tilde = nn.Parameter(torch.zeros(tsize), requires_grad=trainable)
+    
 
     @property
     def T(self):
@@ -214,6 +219,18 @@ class PerceptualCost(nn.Module):
     @property
     def W(self):
         return torch.exp(self.W_tilde)
+    
+    def W_phase(self):
+        # return weights for phase
+        #w_phase =  torch.exp(self.w_phase_tild)
+        w_phase = self.W
+        # set weights of non-phases to 0
+        if not self.trainable:
+            w_phase[0,0] = 0.
+            w_phase[0,self.weight_size[1] - 1] = 0.
+            w_phase[self.weight_size[1] - 1,self.weight_size[1] - 1] = 0.
+            w_phase[self.weight_size[1] - 1, 0] = 0.
+        return w_phase
 
     @property
     def p_1(self):
@@ -271,12 +288,13 @@ class PerceptualCost(nn.Module):
         c1_phase = torch.atan2(C1[:,:,:,:,1], C1[:,:,:,:,0] + EPS)
         
         # angular distance
-        phase_dist = torch.acos(torch.cos(c0_phase - c1_phase)*(1 - EPS*10**3)) * self.W
+        phase_dist = torch.acos(torch.cos(c0_phase - c1_phase)*(1 - EPS*10**3)) * self.W_phase()
         phase_dist = torch.sum(phase_dist, dim=(1,2,3))
         
         # perceptual distance
         distance = percep_dist + phase_dist
-        return distance
+        #return distance
+        return percep_dist
 
     def _luminance_loss(self, C, C_):
         return (torch.abs(C - C_) + EPS) ** self.p_1
@@ -317,13 +335,16 @@ class RGB2YCbCr(nn.Module):
 
 class MultiChannelCost(nn.Module):
 
-    def __init__(self, blocksize=8):
+    def __init__(self, blocksize=8, trainable=True):
         super(MultiChannelCost, self).__init__()
 
         self.add_module('to_YCbCr', RGB2YCbCr())
-        self.add_module('ly', PerceptualCost(blocksize=blocksize))
-        self.add_module('lcb', PerceptualCost(blocksize=blocksize))
-        self.add_module('lcr', PerceptualCost(blocksize=blocksize))
+        self.add_module('ly', PerceptualCost(blocksize=blocksize,
+                                             trainable=trainable))
+        self.add_module('lcb', PerceptualCost(blocksize=blocksize,
+                                              trainable=trainable))
+        self.add_module('lcr', PerceptualCost(blocksize=blocksize,
+                                              trainable=trainable))
 
         self.lambdas = nn.Parameter(torch.zeros(3))
 
