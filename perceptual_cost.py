@@ -190,6 +190,7 @@ class PerceptualCost(nn.Module):
         super(PerceptualCost, self).__init__()
 
         self.trainable = trainable
+        self.blocksize = blocksize
         
         self.weight_size = (blocksize, blocksize // 2 + 1)
 
@@ -206,6 +207,7 @@ class PerceptualCost(nn.Module):
 
         # Sensitivity table half size due to rfft
         tsize  = (blocksize, blocksize//2+1)
+        self.tsize = tsize
         self.T_tilde = nn.Parameter(torch.zeros(tsize), requires_grad=trainable)
         
         # Phase weights
@@ -220,18 +222,6 @@ class PerceptualCost(nn.Module):
     def W(self):
         return torch.exp(self.W_tilde)
     
-    def W_phase(self):
-        # return weights for phase
-        #w_phase =  torch.exp(self.w_phase_tild)
-        w_phase = self.W
-        # set weights of non-phases to 0
-        if not self.trainable:
-            w_phase[0,0] = 0.
-            w_phase[0,self.weight_size[1] - 1] = 0.
-            w_phase[self.weight_size[1] - 1,self.weight_size[1] - 1] = 0.
-            w_phase[self.weight_size[1] - 1, 0] = 0.
-        return w_phase
-
     @property
     def p_1(self):
         return 1. + torch.exp(self.p_1_tilde)
@@ -284,15 +274,26 @@ class PerceptualCost(nn.Module):
         # Phase part - this is basically just copied from the reference
         #   implementation
         # get phases
-        c0_phase = torch.atan2(C0[:,:,:,:,1], C0[:,:,:,:,0] + EPS) 
-        c1_phase = torch.atan2(C1[:,:,:,:,1], C1[:,:,:,:,0] + EPS)
+        c0_phase = torch.atan2(C0[:,:,:,:,1], C0[:,:,:,:,0] + EPS).view(-1,
+                                                                        self.blocksize**2,
+                                                                        self.tsize[0],
+                                                                        self.tsize[1],
+                                                                        1)
+        c1_phase = torch.atan2(C1[:,:,:,:,1], C1[:,:,:,:,0] + EPS).view(-1,
+                                                                        self.blocksize**2,
+                                                                        self.tsize[0],
+                                                                        self.tsize[1],
+                                                                        1)
+
+        c0_phase = torch.cat((torch.sin(c0_phase), torch.cos(c0_phase)), 4)
+        c1_phase = torch.cat((torch.sin(c1_phase), torch.cos(c1_phase)), 4)
         
-        # angular distance
-        phase_dist = torch.acos(torch.cos(c0_phase - c1_phase)*(1 - EPS*10**3)) * self.W_phase()
-        phase_dist = torch.sum(phase_dist, dim=(1,2,3))
+        phase_norms = torch.norm((c0_phase-c1_phase) + EPS, p='fro', dim=4) * self.W
+        phase_dists = torch.sum(phase_norms, dim=(1,2,3))
         
         # perceptual distance
-        distance = percep_dist + phase_dist
+        distance = percep_dist + phase_dists
+        
         #return distance
         return percep_dist
 
@@ -392,7 +393,7 @@ class CostTrainingHarness:
 
     def __init__(self, cuda=True):
         self.cuda = cuda
-        self.cost = MultiChannelCost()
+        self.cost = MultiChannelCost(trainable=True)
         self.loss = WeightedSigmoidBCE()
     
         self.cost = self.cost.cuda() if cuda else self.cost
@@ -506,6 +507,5 @@ if __name__ == '__main__':
 
     p = MultiChannelCost()
     
-    w = make_dot(p(img1, img2), params=dict(p.named_parameters()))
+    w = p(img1, img2)
     print(w)
-    w.view()
